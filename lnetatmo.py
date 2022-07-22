@@ -98,6 +98,8 @@ _GETTHERMOSTATDATA_REQ = _BASE_URL + "api/getthermostatsdata"
 _GETHOMEDATA_REQ       = _BASE_URL + "api/gethomedata"
 _GETCAMERAPICTURE_REQ  = _BASE_URL + "api/getcamerapicture"
 _GETEVENTSUNTIL_REQ    = _BASE_URL + "api/geteventsuntil"
+_HOMESDATA_REQ         = _BASE_URL + "api/homesdata"
+_HOMESTATUS_REQ        = _BASE_URL + "api/homestatus"
 
 
 #TODO# Undocumented (but would be very usefull) API : Access currently forbidden (403)
@@ -451,6 +453,98 @@ class WeatherStationData:
         else:
             return None
 
+class HomesData:
+    """
+    List the Netatmo actual topology and static information of all devices present
+    into a user account. It is also possible to specify a home_id to focus on one home.
+
+    Args:
+        authData (ClientAuth): Authentication information with a working access Token
+        homeId : Home id of the home who's status is requested
+    """
+    def __init__(self, authData, homeId=None):
+        self.getAuthToken = authData.accessToken
+        postParams = {
+            "access_token" : self.getAuthToken
+            }
+        if homeId:
+            postParams['home_id'] = homeId
+        resp = postRequest(_HOMESDATA_REQ, postParams)
+        self.rawData = resp['body']
+
+        # Collect homes
+        self.homes = dict()
+        for home in self.rawData['homes']:
+            self.homes[home['id']] = dict()
+            self.homes[home['id']]['raw_data'] = home
+
+            self.homes[home['id']]['rooms'] = dict()
+            for room in home['rooms']:
+                self.homes[home['id']]['rooms'][room['id']] = room
+
+            self.homes[home['id']]['modules'] = dict()
+            for module in home['modules']:
+                self.homes[home['id']]['modules'][module['id']] = module
+
+    def homesIdList(self):
+        return list(self.homes.keys())
+
+    def homesNamesList(self):
+        return [h['name'] for h in self.homes.values()]
+
+    def homeById(self,homeId):
+        return self.homes[homeId]['raw_data']
+
+    def roomsIdList(self,homeId):
+        return list(self.homes[homeId]['rooms'].keys())
+
+    def roomById(self,homeId,roomId):
+        return self.homes[homeId]['rooms'][roomId]
+
+    def modulesIdList(self,homeId):
+        return list(self.homes[homeId]['modules'].keys())
+
+    def moduleById(self,homeId,moduleId):
+        return self.homes[homeId]['modules'][moduleId]
+
+class HomeStatus:
+    """
+    List the Netatmo home status of all devices present into a specific home.
+
+    Args:
+        authData (ClientAuth): Authentication information with a working access Token
+        homeId : Home id of the home who's status is requested
+    """
+    def __init__(self, authData, homeId):
+        self.getAuthToken = authData.accessToken
+        postParams = {
+            "access_token" : self.getAuthToken,
+            "home_id" : homeId
+            }
+        resp = postRequest(_HOMESTATUS_REQ, postParams)
+        self.rawData = resp['body']
+
+        # Collect rooms
+        self.rooms = dict()
+        for room in self.rawData['home']['rooms']:
+            self.rooms[room['id']] = room
+        # Collect modules
+        self.modules = dict()
+        for module in self.rawData['home']['modules']:
+            self.modules[module['id']] = module
+
+    def roomsIdList(self):
+        return list(self.rooms.keys())
+
+    def roomById(self,rid):
+        return self.rooms[rid]
+
+    def modulesIdList(self):
+        return list(self.modules.keys())
+
+    def moduleById(self,mid):
+        return self.modules[mid]
+
 class DeviceList(WeatherStationData):
     """
     This class is now deprecated. Use WeatherStationData directly instead
@@ -462,10 +556,14 @@ class DeviceList(WeatherStationData):
 class HomeData:
     """
     List the Netatmo home informations (Homes, cameras, events, persons)
+    This class is now deprecated. Use HomesData/HomeStatus instead
 
     Args:
         authData (ClientAuth): Authentication information with a working access Token
     """
+    warnings.warn("The 'WelcomeData' class was renamed 'HomeData' to handle new Netatmo Home capabilities",
+            DeprecationWarning )
+
     def __init__(self, authData, home=None):
         self.getAuthToken = authData.accessToken
         postParams = {
@@ -765,7 +863,7 @@ def cameraCommand(cameraUrl, commande, parameters=None, timeout=3):
     url = cameraUrl + ( commande % parameters if parameters else commande)
     return postRequest(url, timeout=timeout)
     
-def postRequest(url, params=None, timeout=10):
+def postRequest(url, params=None, timeout=30):
     if PYTHON3:
         req = urllib.request.Request(url)
         if params:
