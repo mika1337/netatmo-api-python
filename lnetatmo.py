@@ -301,36 +301,44 @@ class ThermostatData:
             if m['name'] == name: return m
         return None
 
-
-class WeatherStationData:
+class WeatherStationsData:
     """
     List the Weather Station devices (stations and modules)
 
     Args:
         authData (ClientAuth): Authentication information with a working access Token
     """
-    def __init__(self, authData, home=None, station=None):
+    def __init__(self, authData, stationName=None):
         self.getAuthToken = authData.accessToken
         postParams = {
                 "access_token" : self.getAuthToken
                 }
         resp = postRequest(_GETSTATIONDATA_REQ, postParams)
-        self.rawData = resp['body']['devices']
+
         # Weather data
-        if not self.rawData : raise NoDevice("No weather station in any homes")
-        # Stations are no longer in the Netatmo API, keeping them for compatibility
-        self.stations = { d['station_name'] : d for d in self.rawData }
-        self.homes = { d['home_name'] : d["station_name"] for d in self.rawData }
-        # Keeping the old behavior for default station name
-        if home and home not in self.homes : raise NoHome("No home with name %s" % home)
-        self.default_home = home or list(self.homes.keys())[0]
-        if station and station not in self.stations: raise NoDevice("No station with name %s" % station)
-        self.default_station = station or [v["station_name"] for k,v in self.stations.items() if v["home_name"] == self.default_home][0]
-        self.modules = dict()
-        self.default_station_data = self.stationByName(self.default_station)
-        if 'modules' in self.default_station_data:
-            for m in self.default_station_data['modules']:
-                self.modules[ m['_id'] ] = m
+        self.stations = dict()
+        self.default_station_id = None
+
+        self.rawData = resp['body']['devices']
+        if self.rawData:
+            for device in self.rawData:
+                if device['station_name'] == stationName:
+                    self.default_station_id = device['_id']
+
+                modules = dict()
+                if 'modules' in device:
+                    for module in device['modules']:
+                        modules[module['_id']] = module
+
+                self.stations[device['_id']] = device
+                self.stations[device['_id']]['modules'] = modules
+
+        if self.default_station_id == None:
+            if stationName != None:
+                raise NoDevice("No station with name %s" % stationName)
+            else:
+                self.default_station_id = next(iter(self.stations.keys()))
+
         # User data
         userData = resp['body']['user']
         self.user = UserInfo()
@@ -341,31 +349,52 @@ class WeatherStationData:
             else:
                 setattr(self.user, k, v)
 
-
-    def modulesNamesList(self, station=None, home=None):
-        res = [m['module_name'] for m in self.modules.values()]
-        res.append(self.stationByName(station)['module_name'])
-        return res
-
-    def stationByName(self, station=None):
-        if not station : station = self.default_station
-        for i,s in self.stations.items():
-            if s['station_name'] == station :
-                return self.stations[i]
-        return None
-
     def stationById(self, sid):
         return self.stations.get(sid)
 
-    def moduleByName(self, module):
-        for m in self.modules:
-            mod = self.modules[m]
-            if mod['module_name'] == module :
-                return mod
+    def stationByName(self, stationName=None):
+        if not stationName:
+            return self.stations[self.default_station_id]
+
+        for i,s in self.stations.items():
+            if s['station_name'] == stationName :
+                return self.stations[i]
+
         return None
 
-    def moduleById(self, mid):
-        return self.modules.get(mid)
+    def modulesIdsList(self, stationName=None):
+        station = self.stationByName(stationName)
+        res = list(station['modules'].keys())
+        res.append(station['_id'])
+        return res
+
+    def modulesNamesList(self, stationName=None):
+        station = self.stationByName(stationName)
+        res = [m['module_name'] for m in station['modules'].values()]
+        res.append(station['module_name'])
+        return res
+
+    def moduleByName(self, moduleName, stationName=None ):
+        station = self.stationByName(stationName)
+        if station['module_name'] == moduleName:
+            return station
+
+        for module in station['modules']:
+            if module['module_name'] == moduleName :
+                return module
+
+        return None
+
+    def moduleById(self, moduleId, stationName=None ):
+        station = self.stationByName(stationName)
+        if station['_id'] == moduleId:
+            return station
+
+        for module in station['modules'].values():
+            if module['_id'] == moduleId :
+                return module
+
+        return None
 
     def lastData(self, exclude=0):
         s = self.default_station_data
@@ -398,14 +427,16 @@ class WeatherStationData:
         res = self.lastData()
         ret = []
         for mn,v in res.items():
-            if time.time()-v['When'] > delay : ret.append(mn)
+            if time.time()-v['When'] > delay:
+                ret.append(mn)
         return ret if ret else None
 
     def checkUpdated(self, delay=3600):
         res = self.lastData()
         ret = []
         for mn,v in res.items():
-            if time.time()-v['When'] < delay : ret.append(mn)
+            if time.time()-v['When'] < delay:
+                ret.append(mn)
         return ret if ret else None
 
     def getMeasure(self, device_id, scale, mtype, module_id=None, date_begin=None, date_end=None, limit=None, optimize=False, real_time=False):
@@ -544,14 +575,6 @@ class HomeStatus:
 
     def moduleById(self,mid):
         return self.modules[mid]
-
-class DeviceList(WeatherStationData):
-    """
-    This class is now deprecated. Use WeatherStationData directly instead
-    """
-    warnings.warn("The 'DeviceList' class was renamed 'WeatherStationData'",
-            DeprecationWarning )
-    pass
 
 class HomeData:
     """
