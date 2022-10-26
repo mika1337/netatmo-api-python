@@ -310,7 +310,7 @@ class WeatherStationsData:
             if s['station_name'] == stationName :
                 return self.stations[i]
 
-        return None
+        raise NoDevice("No station with name %s" % stationName)
 
     def modulesIdsList(self, stationName=None):
         station = self.stationByName(stationName)
@@ -333,7 +333,7 @@ class WeatherStationsData:
             if module['module_name'] == moduleName :
                 return module
 
-        return None
+        raise NoDevice("No module with name %s" % moduleName)
 
     def moduleById(self, moduleId, stationName=None ):
         station = self.stationByName(stationName)
@@ -344,7 +344,7 @@ class WeatherStationsData:
             if module['_id'] == moduleId :
                 return module
 
-        return None
+        raise NoDevice("No module with id %s" % moduleId)
 
     def lastData(self, exclude=0):
         s = self.default_station_data
@@ -458,6 +458,9 @@ class HomesData:
             self.homes[home['id']] = dict()
             self.homes[home['id']]['raw_data'] = home
 
+            self.homes[home['id']]['id'  ] = home['id']
+            self.homes[home['id']]['name'] = home['name']
+
             self.homes[home['id']]['rooms'] = dict()
             for room in home['rooms']:
                 self.homes[home['id']]['rooms'][room['id']] = room
@@ -475,11 +478,23 @@ class HomesData:
     def homeById(self,homeId):
         return self.homes[homeId]['raw_data']
 
+    def homeByName(self,homeName):
+        for home in self.homes.values():
+            if home['name'] == homeName:
+                return home
+        raise NoDevice("No home with name %s" % homeName)
+
     def roomsIdList(self,homeId):
         return list(self.homes[homeId]['rooms'].keys())
 
     def roomById(self,homeId,roomId):
         return self.homes[homeId]['rooms'][roomId]
+
+    def roomByName(self,homeId,roomName):
+        for room in self.homes[homeId]['rooms'].values():
+            if room['name'] == roomName:
+                return room
+        raise NoDevice("No room with name %s" % roomName)
 
     def modulesIdList(self,homeId):
         return list(self.homes[homeId]['modules'].keys())
