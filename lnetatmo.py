@@ -17,7 +17,6 @@ if __name__ == "__main__": warnings.filterwarnings("ignore") # For installation 
 from sys import version_info
 from os import getenv
 from os.path import expanduser, exists
-import platform
 import json, time
 import imghdr
 import warnings
@@ -39,51 +38,6 @@ else:
 # To be able to have a program accessing your netatmo data, you have to register your program as
 # a Netatmo app in your Netatmo account. All you have to do is to give it a name (whatever) and you will be
 # returned a client_id and secret that your app has to supply to access netatmo servers.
-
-# To ease Docker packaging of your application, you can setup your authentication parameters through env variables
-
-# Authentication use :
-#  1 - Values hard coded in the library
-#  2 - The .netatmo.credentials file in JSON format in your home directory
-#  3 - Values defined in environment variables : CLIENT_ID, CLIENT_SECRET, USERNAME, PASSWORD
-#      Note: The USERNAME environment variable may interfer with the envvar used by Windows for login name
-#            if you have this issue, do not forget to "unset USERNAME" before running your program
-
-# Each level override values defined in the previous level. You could define CLIENT_ID and CLIENT_SECRET hard coded in the library
-# and username/password in .netatmo.credentials or environment variables
-
-# 1 : Embedded credentials
-cred = {                           # You can hard code authentication information in the following lines
-        "CLIENT_ID" :  "",         #   Your client ID from Netatmo app registration at http://dev.netatmo.com/dev/listapps
-        "CLIENT_SECRET" : "",      #   Your client app secret   '     '
-        "USERNAME" : "",           #   Your netatmo account username
-        "PASSWORD" : ""            #   Your netatmo account password
-        }
-
-# Other authentication setup management (optionals)
-
-CREDENTIALS = expanduser("~/.netatmo.credentials")
-
-def getParameter(key, default):
-    return getenv(key, default[key])
-
-# 2 : Override hard coded values with credentials file if any
-if exists(CREDENTIALS) :
-    with open(CREDENTIALS, "r") as f:
-        cred.update({k.upper():v for k,v in json.loads(f.read()).items()})
-
-# 3 : Override final value with content of env variables if defined
-#     Warning, for Windows user, USERNAME contains by default the windows logged user name
-#     This usually lead to an authentication error
-if platform.system() == "Windows" and getenv("USERNAME", None):
-    warnings.warn("You are running on Windows and the USERNAME env var is set. " \
-                  "Be sure this env var contains Your Netatmo username " \
-                  "or clear it with <SET USERNAME=> before running your program\n", RuntimeWarning, stacklevel=3)
-
-_CLIENT_ID     = getParameter("CLIENT_ID", cred)
-_CLIENT_SECRET = getParameter("CLIENT_SECRET", cred)
-_USERNAME      = getParameter("USERNAME", cred)
-_PASSWORD      = getParameter("PASSWORD", cred)
 
 #########################################################################
 
@@ -168,77 +122,75 @@ class NoHome( Exception ):
 class AuthFailure( Exception ):
     pass
 
+class TokenError( Exception ):
+    pass
 
-class ClientAuth:
-    """
-    Request authentication and keep access token available through token method. Renew it automatically if necessary
+class AccessToken:
+    def __init__( self, client_id, client_secret, access_token, refresh_token, scope, expiration_time ):
+        self._client_id     = client_id
+        self._client_secret = client_secret
+        self._access_token  = access_token
+        self._refresh_token = refresh_token
+        self._scope         = scope
+        self._expiration_time = expiration_time
 
-    Args:
-        clientId (str): Application clientId delivered by Netatmo on dev.netatmo.com
-        clientSecret (str): Application Secret key delivered by Netatmo on dev.netatmo.com
-        username (str)
-        password (str)
-        scope (Optional[str]): Default value is 'read_station'
-            read_station: to retrieve weather station data (Getstationsdata, Getmeasure)
-            read_camera: to retrieve Welcome data (Gethomedata, Getcamerapicture)
-            access_camera: to access the camera, the videos and the live stream.
-            Several value can be used at the same time, ie: 'read_station read_camera'
-    """
-
-    def __init__(self, clientId=_CLIENT_ID,
-                       clientSecret=_CLIENT_SECRET,
-                       username=_USERNAME,
-                       password=_PASSWORD,
-                       scope="read_station read_camera access_camera write_camera " \
-                                 "read_presence access_presence write_presence read_thermostat write_thermostat"):
-        
-        postParams = {
-                "grant_type" : "password",
-                "client_id" : clientId,
-                "client_secret" : clientSecret,
-                "username" : username,
-                "password" : password,
-                "scope" : scope
-                }
-        resp = postRequest(_AUTH_REQ, postParams)
-        if not resp: raise AuthFailure("Authentication request rejected")
-
-        self._clientId = clientId
-        self._clientSecret = clientSecret
-        self._accessToken = resp['access_token']
-        self.refreshToken = resp['refresh_token']
-        self._scope = resp['scope']
-        self.expiration = int(resp['expire_in'] + time.time())
-
-    @property
-    def accessToken(self):
-
-        if self.expiration < time.time(): # Token should be renewed
+    def getAccessToken( self ):
+        if self._expiration_time < time.time(): # Token should be renewed
             postParams = {
-                    "grant_type" : "refresh_token",
-                    "refresh_token" : self.refreshToken,
-                    "client_id" : self._clientId,
-                    "client_secret" : self._clientSecret
+                    "grant_type"    : "refresh_token",
+                    "refresh_token" : self._refresh_token,
+                    "client_id"     : self._client_id,
+                    "client_secret" : self._client_secret
                     }
             resp = postRequest(_AUTH_REQ, postParams)
-            self._accessToken = resp['access_token']
-            self.refreshToken = resp['refresh_token']
-            self.expiration = int(resp['expire_in'] + time.time())
-        return self._accessToken
+            self._access_token    = resp['access_token']
+            self._refresh_token   = resp['refresh_token']
+            self._expiration_time = int(resp['expire_in'] + time.time())
+        return self._access_token
 
+def generateTokenFromClientCredentials( client_id, client_secret, username, password,
+                                        scope="read_station read_camera access_camera write_camera " \
+                                              "read_presence access_presence write_presence read_thermostat write_thermostat"):
+    postParams = {
+            "grant_type"    : "password",
+            "client_id"     : client_id,
+            "client_secret" : client_secret,
+            "username"      : username,
+            "password"      : password,
+            "scope"         : scope
+            }
+    resp = postRequest(_AUTH_REQ, postParams)
+    if not resp: raise AuthFailure("Authentication request rejected")
+
+    return AccessToken( client_id, client_secret
+                      , resp['access_token'], resp['refresh_token']
+                      , resp['scope'], int(resp['expire_in'] + time.time()) )
+
+def saveTokenToFile( token, filename ):
+    if not isinstance( token, AccessToken):
+        raise ValueError( 'Token is not an access token, not writing file' )
+    with open(filename, 'w') as f:
+        json.dump( token.__dict__, f )
+
+def loadTokenFromFile( filename ):
+    with open(filename, 'r') as f:
+        token_data = json.load( f )
+        return AccessToken( token_data['_client_id'], token_data['_client_secret']
+                          , token_data['_access_token'], token_data['_refresh_token']
+                          , token_data['_scope'], token_data['_expiration_time'] )
 
 class User:
     """
     This class returns basic information about the user
 
     Args:
-        authData (ClientAuth): Authentication information with a working access Token
+        token: Access token
     """
     warnings.warn("The 'User' class is no longer maintained by Netatmo",
             DeprecationWarning )
-    def __init__(self, authData):
+    def __init__(self, token):
         postParams = {
-                "access_token" : authData.accessToken
+                "access_token" : token.getAccessToken()
                 }
         resp = postRequest(_GETSTATIONDATA_REQ, postParams)
         self.rawData = resp['body']
@@ -259,10 +211,10 @@ class ThermostatData:
     List the Thermostat and temperature modules
 
     Args:
-        authData (clientAuth): Authentication information with a working access Token
+        token: Access token
         home : Home name or id of the home who's thermostat belongs to
     """
-    def __init__(self, authData, home=None):
+    def __init__(self, token, home=None):
 
         # I don't own a thermostat thus I am not able to test the Thermostat support
         warnings.warn("The Thermostat code is not tested due to the lack of test environment.\n" \
@@ -270,9 +222,8 @@ class ThermostatData:
                       "Please report found issues (https://github.com/philippelt/netatmo-api-python/issues)",
                        RuntimeWarning )
 
-        self.getAuthToken = authData.accessToken
         postParams = {
-                "access_token" : self.getAuthToken
+                "access_token" : token.getAccessToken()
                 }
         resp = postRequest(_GETTHERMOSTATDATA_REQ, postParams)
         self.rawData = resp['body']['devices']
@@ -306,12 +257,11 @@ class WeatherStationsData:
     List the Weather Station devices (stations and modules)
 
     Args:
-        authData (ClientAuth): Authentication information with a working access Token
+        token: Access token
     """
-    def __init__(self, authData, stationName=None):
-        self.getAuthToken = authData.accessToken
+    def __init__(self, token, stationName=None):
         postParams = {
-                "access_token" : self.getAuthToken
+                "access_token" : token.getAccessToken()
                 }
         resp = postRequest(_GETSTATIONDATA_REQ, postParams)
 
@@ -376,10 +326,10 @@ class WeatherStationsData:
 
     def moduleByName(self, moduleName, stationName=None ):
         station = self.stationByName(stationName)
+        import pprint
         if station['module_name'] == moduleName:
             return station
-
-        for module in station['modules']:
+        for module in station['modules'].values():
             if module['module_name'] == moduleName :
                 return module
 
@@ -490,13 +440,12 @@ class HomesData:
     into a user account. It is also possible to specify a home_id to focus on one home.
 
     Args:
-        authData (ClientAuth): Authentication information with a working access Token
+        token: Access token
         homeId : Home id of the home who's status is requested
     """
-    def __init__(self, authData, homeId=None):
-        self.getAuthToken = authData.accessToken
+    def __init__(self, token, homeId=None):
         postParams = {
-            "access_token" : self.getAuthToken
+            "access_token" : token.getAccessToken()
             }
         if homeId:
             postParams['home_id'] = homeId
@@ -543,13 +492,12 @@ class HomeStatus:
     List the Netatmo home status of all devices present into a specific home.
 
     Args:
-        authData (ClientAuth): Authentication information with a working access Token
+        token: Access token
         homeId : Home id of the home who's status is requested
     """
-    def __init__(self, authData, homeId):
-        self.getAuthToken = authData.accessToken
+    def __init__(self, token, homeId):
         postParams = {
-            "access_token" : self.getAuthToken,
+            "access_token" : token.getAccessToken(),
             "home_id" : homeId
             }
         resp = postRequest(_HOMESTATUS_REQ, postParams)
@@ -582,15 +530,14 @@ class HomeData:
     This class is now deprecated. Use HomesData/HomeStatus instead
 
     Args:
-        authData (ClientAuth): Authentication information with a working access Token
+        token: Access token
     """
     warnings.warn("The 'WelcomeData' class was renamed 'HomeData' to handle new Netatmo Home capabilities",
             DeprecationWarning )
 
-    def __init__(self, authData, home=None):
-        self.getAuthToken = authData.accessToken
+    def __init__(self, token, home=None):
         postParams = {
-            "access_token" : self.getAuthToken
+            "access_token" : token.getAccessToken()
             }
         resp = postRequest(_GETHOMEDATA_REQ, postParams)
         self.rawData = resp['body']
@@ -953,9 +900,7 @@ def getStationMinMaxTH(station=None, module=None, home=None):
 
 
 # auto-test when executed directly
-
-if __name__ == "__main__":
-
+def selfTest():
     from sys import exit, stdout, stderr
     
     logging.basicConfig(format='%(name)s - %(levelname)s: %(message)s', level=logging.INFO)
@@ -967,7 +912,7 @@ if __name__ == "__main__":
     authorization = ClientAuth()  # Test authentication method
     
     try:
-        weatherStation = WeatherStationData(authorization)         # Test DEVICELIST
+        weatherStation = WeatherStationsData(authorization)         # Test DEVICELIST
     except NoDevice:
         logger.warning("No weather station available for testing")
     else:
@@ -986,4 +931,21 @@ if __name__ == "__main__":
     # If we reach this line, all is OK
     logger.info("OK")
 
-    exit(0)
+if __name__ == "__main__":
+    import sys
+    from getpass import getpass
+
+    logging.basicConfig(level=logging.DEBUG)
+
+    if len(sys.argv) != 5:
+        logger.info(f'To generate token file: {sys.argv[0]} <client id> <client secret> <username> <token file>')
+        sys.exit(1)
+    else:
+        client_id = sys.argv[1]
+        client_secret = sys.argv[2]
+        username = sys.argv[3]
+        password = getpass()
+        token_file = sys.argv[4]
+
+        token = generateTokenFromClientCredentials( client_id, client_secret, username, password )
+        saveTokenToFile( token, token_file )
