@@ -126,12 +126,11 @@ class TokenError( Exception ):
     pass
 
 class AccessToken:
-    def __init__( self, client_id, client_secret, access_token, refresh_token, scope, expiration_time ):
+    def __init__( self, client_id, client_secret, access_token, refresh_token, expiration_time ):
         self._client_id     = client_id
         self._client_secret = client_secret
         self._access_token  = access_token
         self._refresh_token = refresh_token
-        self._scope         = scope
         self._expiration_time = expiration_time
 
     def getAccessToken( self ):
@@ -148,23 +147,15 @@ class AccessToken:
             self._expiration_time = int(resp['expire_in'] + time.time())
         return self._access_token
 
-def generateTokenFromClientCredentials( client_id, client_secret, username, password,
-                                        scope="read_station read_camera access_camera write_camera " \
-                                              "read_presence access_presence write_presence read_thermostat write_thermostat"):
-    postParams = {
-            "grant_type"    : "password",
-            "client_id"     : client_id,
-            "client_secret" : client_secret,
-            "username"      : username,
-            "password"      : password,
-            "scope"         : scope
-            }
-    resp = postRequest(_AUTH_REQ, postParams)
-    if not resp: raise AuthFailure("Authentication request rejected")
+def generateToken( client_id, client_secret, refresh_token ):
+    # Initialize token
+    access_token = AccessToken( client_id, client_secret, None, refresh_token, 0 )
 
-    return AccessToken( client_id, client_secret
-                      , resp['access_token'], resp['refresh_token']
-                      , resp['scope'], int(resp['expire_in'] + time.time()) )
+    # Force token refresh
+    access_token.getAccessToken()
+
+    return access_token
+
 
 def saveTokenToFile( token, filename ):
     if not isinstance( token, AccessToken):
@@ -177,7 +168,7 @@ def loadTokenFromFile( filename ):
         token_data = json.load( f )
         return AccessToken( token_data['_client_id'], token_data['_client_secret']
                           , token_data['_access_token'], token_data['_refresh_token']
-                          , token_data['_scope'], token_data['_expiration_time'] )
+                          , token_data['_expiration_time'] )
 
 class User:
     """
@@ -953,14 +944,13 @@ if __name__ == "__main__":
     logging.basicConfig(level=logging.DEBUG)
 
     if len(sys.argv) != 5:
-        logger.info(f'To generate token file: {sys.argv[0]} <client id> <client secret> <username> <token file>')
+        logger.info(f'To generate token file: {sys.argv[0]} <client id> <client secret> <refresh token> <new token file>')
         sys.exit(1)
     else:
         client_id = sys.argv[1]
         client_secret = sys.argv[2]
-        username = sys.argv[3]
-        password = getpass()
+        refresh_token = sys.argv[3]
         token_file = sys.argv[4]
 
-        token = generateTokenFromClientCredentials( client_id, client_secret, username, password )
+        token = generateToken( client_id, client_secret, refresh_token )
         saveTokenToFile( token, token_file )
