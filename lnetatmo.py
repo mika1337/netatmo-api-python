@@ -511,10 +511,15 @@ class HomeStatus:
 
         # Collect rooms
         self.rooms = dict()
+        if 'rooms' not in self.rawData['home']:
+            raise NoDevice("No home room data available")
         for room in self.rawData['home']['rooms']:
             self.rooms[room['id']] = room
+
         # Collect modules
         self.modules = dict()
+        if 'modules' not in self.rawData['home']:
+            raise NoDevice("No home module data available")
         for module in self.rawData['home']['modules']:
             self.modules[module['id']] = module
 
