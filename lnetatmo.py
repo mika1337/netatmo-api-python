@@ -126,49 +126,55 @@ class TokenError( Exception ):
     pass
 
 class AccessToken:
-    def __init__( self, client_id, client_secret, access_token, refresh_token, expiration_time ):
-        self._client_id     = client_id
-        self._client_secret = client_secret
-        self._access_token  = access_token
-        self._refresh_token = refresh_token
-        self._expiration_time = expiration_time
+    def __init__( self, token_file, client_id = None, client_secret = None, access_token = None, refresh_token = None, expiration_time = None ):
+        self._token_file = token_file
+        self._token_data = dict()
+
+        if client_id is None:
+            logger.info("Loading token from %s",self._token_file)
+            with open(self._token_file, 'r') as f:
+                self._token_data = json.load( f )
+
+        else:
+            logger.info("Initializing token from user input")
+
+            self._token_data['client_id'      ] = client_id
+            self._token_data['client_secret'  ] = client_secret
+            self._token_data['access_token'   ] = access_token
+            self._token_data['refresh_token'  ] = refresh_token
+            self._token_data['expiration_time'] = expiration_time
+
+    def saveToken( self ):
+        logger.info("Writing token to %s",self._token_file)
+        with open(self._token_file, 'w') as f:
+            json.dump( self._token_data, f )
 
     def getAccessToken( self ):
-        if self._expiration_time < time.time(): # Token should be renewed
+        if self._token_data['expiration_time'] < time.time(): # Token should be renewed
             postParams = {
                     "grant_type"    : "refresh_token",
-                    "refresh_token" : self._refresh_token,
-                    "client_id"     : self._client_id,
-                    "client_secret" : self._client_secret
+                    "refresh_token" : self._token_data['refresh_token'],
+                    "client_id"     : self._token_data['client_id'    ],
+                    "client_secret" : self._token_data['client_secret']
                     }
             resp = postRequest(_AUTH_REQ, postParams)
-            self._access_token    = resp['access_token']
-            self._refresh_token   = resp['refresh_token']
-            self._expiration_time = int(resp['expire_in'] + time.time())
-        return self._access_token
+            if self._token_data['refresh_token'] != resp['refresh_token']:
+                self.saveToken()
+            self._token_data['access_token'   ] = resp['access_token']
+            self._token_data['refresh_token'  ] = resp['refresh_token']
+            self._token_data['expiration_time'] = int(resp['expire_in'] + time.time())
 
-def generateToken( client_id, client_secret, refresh_token ):
+        return self._token_data['access_token']
+
+def generateToken( token_file, client_id, client_secret, refresh_token ):
     # Initialize token
-    access_token = AccessToken( client_id, client_secret, None, refresh_token, 0 )
+    access_token = AccessToken( token_file, client_id, client_secret, None, refresh_token, 0 )
 
     # Force token refresh
     access_token.getAccessToken()
 
-    return access_token
-
-
-def saveTokenToFile( token, filename ):
-    if not isinstance( token, AccessToken):
-        raise ValueError( 'Token is not an access token, not writing file' )
-    with open(filename, 'w') as f:
-        json.dump( token.__dict__, f )
-
-def loadTokenFromFile( filename ):
-    with open(filename, 'r') as f:
-        token_data = json.load( f )
-        return AccessToken( token_data['_client_id'], token_data['_client_secret']
-                          , token_data['_access_token'], token_data['_refresh_token']
-                          , token_data['_expiration_time'] )
+    # Save token
+    access_token.saveToken()
 
 class User:
     """
@@ -854,7 +860,7 @@ def postRequest(url, params=None, timeout=30):
             resp = urllib.request.urlopen(req, params, timeout=timeout) if params else urllib.request.urlopen(req, timeout=timeout)
         except urllib.error.HTTPError as err:
             logger.error("code=%s, reason=%s" % (err.code, err.reason))
-            return None
+            raise
     else:
         if params:
             params = urlencode(params)
@@ -864,7 +870,7 @@ def postRequest(url, params=None, timeout=30):
             resp = urllib2.urlopen(req, timeout=timeout)
         except urllib2.HTTPError as err:
             logger.error("code=%s, reason=%s" % (err.code, err.reason))
-            return None
+            raise
     data = b""
     for buff in iter(lambda: resp.read(65535), b''): data += buff
     # Return values in bytes if not json data to handle properly camera images
@@ -957,5 +963,4 @@ if __name__ == "__main__":
         refresh_token = sys.argv[3]
         token_file = sys.argv[4]
 
-        token = generateToken( client_id, client_secret, refresh_token )
-        saveTokenToFile( token, token_file )
+        generateToken( token_file, client_id, client_secret, refresh_token )
