@@ -131,7 +131,7 @@ class AccessToken:
         self._token_data = dict()
 
         if client_id is None:
-            logger.info("Loading token from %s",self._token_file)
+            logger.info("Loading token from \"%s\"",self._token_file)
             with open(self._token_file, 'r') as f:
                 self._token_data = json.load( f )
 
@@ -157,12 +157,13 @@ class AccessToken:
                     "client_id"     : self._token_data['client_id'    ],
                     "client_secret" : self._token_data['client_secret']
                     }
+
             resp = postRequest(_AUTH_REQ, postParams)
-            if self._token_data['refresh_token'] != resp['refresh_token']:
-                self.saveToken()
             self._token_data['access_token'   ] = resp['access_token']
             self._token_data['refresh_token'  ] = resp['refresh_token']
             self._token_data['expiration_time'] = int(resp['expire_in'] + time.time())
+
+            self.saveToken()
 
         return self._token_data['access_token']
 
