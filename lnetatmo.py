@@ -256,7 +256,7 @@ class WeatherStationsData:
     Args:
         token: Access token
     """
-    def __init__(self, token, stationName=None):
+    def __init__(self, token, stationIdName=None):
         postParams = {
                 "access_token" : token.getAccessToken()
                 }
@@ -269,7 +269,7 @@ class WeatherStationsData:
         self.rawData = resp['body']['devices']
         if self.rawData:
             for device in self.rawData:
-                if device['station_name'] == stationName:
+                if device['station_name'] == stationIdName or device['_id'] == stationIdName:
                     self.default_station_id = device['_id']
 
                 modules = dict()
@@ -281,8 +281,8 @@ class WeatherStationsData:
                 self.stations[device['_id']]['modules'] = modules
 
         if self.default_station_id == None:
-            if stationName != None:
-                raise NoDevice("No station with name %s" % stationName)
+            if stationIdName != None:
+                raise NoDevice("No station with id/name %s" % stationIdName)
             else:
                 self.default_station_id = next(iter(self.stations.keys()))
 
@@ -480,6 +480,9 @@ class HomesData:
             if home['name'] == homeName:
                 return home
         raise NoDevice("No home with name %s" % homeName)
+
+    def homeNameById(self,homeId):
+        return self.homes[homeId]['raw_data']['name']
 
     def roomsIdList(self,homeId):
         return list(self.homes[homeId]['rooms'].keys())
